@@ -7,6 +7,8 @@ import uk.gov.ida.notification.exceptions.hubresponse.InvalidHubResponseExceptio
 import uk.gov.ida.notification.saml.validation.components.ResponseAttributesValidator;
 import uk.gov.ida.saml.core.validation.SamlTransformationErrorException;
 import uk.gov.ida.saml.hub.validators.response.idp.IdpResponseValidator;
+import uk.gov.ida.saml.security.validators.ValidatedAssertions;
+import uk.gov.ida.saml.security.validators.ValidatedResponse;
 
 public class HubResponseValidator {
 
@@ -18,6 +20,14 @@ public class HubResponseValidator {
         this.responseAttributesValidator = responseAttributesValidator;
     }
 
+    public ValidatedResponse getValidatedResponse() {
+        return idpResponseValidator.getValidatedResponse();
+    }
+
+    public ValidatedAssertions getValidatedAssertions() {
+        return idpResponseValidator.getValidatedAssertions();
+    }
+
     public void validate(Response response) {
         try {
             idpResponseValidator.validate(response);
@@ -27,6 +37,7 @@ public class HubResponseValidator {
                 .orElseThrow(() -> new InvalidHubResponseException("Missing Matching Dataset Assertions"));
             AttributeStatement attributeStatement = assertion.getAttributeStatements().get(0);
             responseAttributesValidator.validate(attributeStatement);
+            idpResponseValidator.getValidatedResponse();
         } catch (SamlTransformationErrorException exception) {
             throw new InvalidHubResponseException(exception.getMessage(), exception);
         }

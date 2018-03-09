@@ -123,6 +123,22 @@ public class HubResponseAppRuleTests extends ProxyNodeAppRuleTestBase {
         assertThat(message).contains("Error handling hub response");
     }
 
+    @Test
+    public void shouldValidateHubResponseMessage() throws Exception {
+        Response invalidResponse = new HubResponseBuilder()
+            .withIssuer(null)
+            .addEncryptedAuthnStatementAssertionUsing(hubAssertionsEncryptionCredential)
+            .addEncryptedMatchingDatasetAssertionUsing(hubAssertionsEncryptionCredential)
+            .build();
+
+        samlObjectSigner.sign(invalidResponse);
+        javax.ws.rs.core.Response response = postHubResponseToProxyNode(invalidResponse);
+        String message = response.readEntity(String.class);
+
+        assertEquals(response.getStatus(), HttpStatus.SC_BAD_REQUEST);
+        assertThat(message).contains("SAML 'Issuer' element has no value.");
+    }
+
     private Response extractEidasResponse(Response hubResponse) throws Exception {
         String html = postHubResponseToProxyNode(hubResponse).readEntity(String.class);
         String decodedEidasResponse = HtmlHelpers.getValueFromForm(html, "saml-form", SamlFormMessageType.SAML_RESPONSE);
@@ -146,6 +162,7 @@ public class HubResponseAppRuleTests extends ProxyNodeAppRuleTestBase {
 
     private Response buildUnsignedHubResponse() throws MarshallingException, SignatureException {
         return new HubResponseBuilder()
+                .withDestination("http://proxy-node/SAML2/SSO/Response")
                 .withIssuer(TestEntityIds.STUB_IDP_ONE)
                 .addEncryptedAuthnStatementAssertionUsing(hubAssertionsEncryptionCredential)
                 .addEncryptedMatchingDatasetAssertionUsing(hubAssertionsEncryptionCredential)

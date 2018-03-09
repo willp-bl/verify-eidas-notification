@@ -1,5 +1,6 @@
 package uk.gov.ida.notification;
 
+import com.google.common.collect.ImmutableList;
 import io.dropwizard.Application;
 import io.dropwizard.configuration.EnvironmentVariableSubstitutor;
 import io.dropwizard.configuration.SubstitutingSourceProvider;
@@ -10,8 +11,10 @@ import net.shibboleth.utilities.java.support.component.ComponentInitializationEx
 import org.opensaml.core.config.InitializationException;
 import org.opensaml.core.config.InitializationService;
 import org.opensaml.saml.metadata.resolver.MetadataResolver;
+import org.opensaml.saml.saml2.encryption.Decrypter;
 import org.opensaml.saml.security.impl.MetadataCredentialResolver;
 import org.opensaml.security.credential.BasicCredential;
+import org.opensaml.security.credential.Credential;
 import org.opensaml.xmlsec.config.DefaultSecurityConfigurationBootstrap;
 import org.opensaml.xmlsec.keyinfo.KeyInfoCredentialResolver;
 import org.opensaml.xmlsec.signature.support.impl.ExplicitKeySignatureTrustEngine;
@@ -20,7 +23,6 @@ import uk.gov.ida.notification.exceptions.mappers.HubResponseExceptionMapper;
 import uk.gov.ida.notification.pki.KeyPairConfiguration;
 import uk.gov.ida.notification.resources.EidasAuthnRequestResource;
 import uk.gov.ida.notification.resources.HubResponseResource;
-import uk.gov.ida.notification.saml.ResponseAssertionDecrypter;
 import uk.gov.ida.notification.saml.SamlObjectSigner;
 import uk.gov.ida.notification.saml.converters.AuthnRequestParameterProvider;
 import uk.gov.ida.notification.saml.converters.ResponseParameterProvider;
@@ -37,9 +39,13 @@ import uk.gov.ida.notification.saml.validation.components.SpTypeValidator;
 import uk.gov.ida.saml.metadata.MetadataConfiguration;
 import uk.gov.ida.saml.metadata.MetadataHealthCheck;
 import uk.gov.ida.saml.metadata.bundle.MetadataResolverBundle;
+import uk.gov.ida.saml.security.AssertionDecrypter;
+import uk.gov.ida.saml.security.DecrypterFactory;
 import uk.gov.ida.saml.security.MetadataBackedSignatureValidator;
 import uk.gov.ida.saml.security.SamlMessageSignatureValidator;
-import uk.gov.ida.saml.security.validators.signature.SamlResponseSignatureValidator;
+import uk.gov.ida.saml.security.validators.encryptedelementtype.EncryptionAlgorithmValidator;
+
+import java.util.List;
 
 public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfiguration> {
 
@@ -48,7 +54,6 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
 
     private MetadataResolverBundle<EidasProxyNodeConfiguration> hubMetadataResolverBundle;
     private MetadataResolverBundle<EidasProxyNodeConfiguration> connectorMetadataResolverBundle;
-    private SamlResponseSignatureValidator hubResponseSignatureValidator;
 
     @SuppressWarnings("WeakerAccess") // Needed for DropwizardAppRules
     public EidasProxyNodeApplication() {
@@ -110,7 +115,6 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
                     final Environment environment) throws
             ComponentInitializationException {
 
-        hubResponseSignatureValidator = createSignatureValidator(hubMetadataResolverBundle);
         connectorNodeUrl = configuration.getConnectorNodeUrl().toString();
         connectorMetadata = createMetadata(connectorMetadataResolverBundle);
 
@@ -131,62 +135,6 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
         registerResources(configuration, environment);
     }
 
-    private SamlResponseSignatureValidator createSignatureValidator(MetadataResolverBundle hubMetadataResolverBundle) throws ComponentInitializationException {
-        MetadataCredentialResolver hubMetadataCredentialResolver = new MetadataCredentialResolverInitializer(hubMetadataResolverBundle.getMetadataResolver()).initialize();
-        KeyInfoCredentialResolver keyInfoCredentialResolver = DefaultSecurityConfigurationBootstrap.buildBasicInlineKeyInfoCredentialResolver();
-        ExplicitKeySignatureTrustEngine explicitKeySignatureTrustEngine = new ExplicitKeySignatureTrustEngine(hubMetadataCredentialResolver, keyInfoCredentialResolver);
-        MetadataBackedSignatureValidator metadataBackedSignatureValidator = MetadataBackedSignatureValidator.withoutCertificateChainValidation(explicitKeySignatureTrustEngine);
-        SamlMessageSignatureValidator samlMessageSignatureValidator = new SamlMessageSignatureValidator(metadataBackedSignatureValidator);
-        return new SamlResponseSignatureValidator(samlMessageSignatureValidator);
-    }
-
-    private EidasResponseGenerator createEidasResponseGenerator(EidasProxyNodeConfiguration configuration) {
-        HubResponseTranslator hubResponseTranslator = new HubResponseTranslator(
-                new EidasResponseBuilder(configuration.getConnectorNodeIssuerId()),
-                connectorNodeUrl,
-                configuration.getProxyNodeMetadataForConnectorNodeUrl().toString()
-        );
-        SamlObjectSigner signer = new SamlObjectSigner(
-                configuration.getConnectorFacingSigningKeyPair().getPublicKey().getPublicKey(),
-                configuration.getConnectorFacingSigningKeyPair().getPrivateKey().getPrivateKey(),
-                configuration.getConnectorFacingSigningKeyPair().getPublicKey().getCert()
-        );
-        return new EidasResponseGenerator(hubResponseTranslator, signer);
-    }
-
-    private HubAuthnRequestGenerator createHubAuthnRequestGenerator(EidasProxyNodeConfiguration configuration) {
-        EidasAuthnRequestTranslator eidasAuthnRequestTranslator = new EidasAuthnRequestTranslator(
-                configuration.getProxyNodeEntityId(),
-                configuration.getHubUrl().toString());
-        SamlObjectSigner signer = new SamlObjectSigner(
-                configuration.getHubFacingSigningKeyPair().getPublicKey().getPublicKey(),
-                configuration.getHubFacingSigningKeyPair().getPrivateKey().getPrivateKey(),
-                configuration.getHubFacingSigningKeyPair().getPublicKey().getCert()
-        );
-        return new HubAuthnRequestGenerator(eidasAuthnRequestTranslator, signer);
-    }
-
-    private EidasAuthnRequestValidator createEidasAuthnRequestValidator() {
-        return new EidasAuthnRequestValidator(
-                new RequestIssuerValidator(),
-                new SpTypeValidator(),
-                new LoaValidator(),
-                new RequestedAttributesValidator()
-        );
-    }
-
-    private ResponseAssertionDecrypter createDecrypter(KeyPairConfiguration configuration) {
-        return new ResponseAssertionDecrypter(new BasicCredential(
-                configuration.getPublicKey().getPublicKey(),
-                configuration.getPrivateKey().getPrivateKey())
-        );
-    }
-
-    private Metadata createMetadata(MetadataResolverBundle bundle) throws ComponentInitializationException {
-        MetadataCredentialResolver metadataCredentialResolver = new MetadataCredentialResolverInitializer(bundle.getMetadataResolver()).initialize();
-        return new Metadata(metadataCredentialResolver);
-    }
-
     private void registerProviders(Environment environment) {
         environment.jersey().register(AuthnRequestParameterProvider.class);
         environment.jersey().register(ResponseParameterProvider.class);
@@ -197,12 +145,17 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
         environment.jersey().register(new AuthnRequestExceptionMapper());
     }
 
-    private void registerResources(EidasProxyNodeConfiguration configuration, Environment environment) {
+    private void registerResources(EidasProxyNodeConfiguration configuration, Environment environment) throws ComponentInitializationException {
         SamlFormViewBuilder samlFormViewBuilder = new SamlFormViewBuilder();
+
         EidasResponseGenerator eidasResponseGenerator = createEidasResponseGenerator(configuration);
         HubAuthnRequestGenerator hubAuthnRequestGenerator = createHubAuthnRequestGenerator(configuration);
-        ResponseAssertionDecrypter assertionDecrypter = createDecrypter(configuration.getHubFacingEncryptionKeyPair());
+
+        KeyPairConfiguration hubFacingEncryptionKeyPair = configuration.getHubFacingEncryptionKeyPair();
+        AssertionDecrypter assertionDecrypter = createDecrypter(hubFacingEncryptionKeyPair);
+
         EidasAuthnRequestValidator eidasAuthnRequestValidator = createEidasAuthnRequestValidator();
+        SamlMessageSignatureValidator hubResponseMessageSignatureValidator = createSamlMessagesSignatureValidator(hubMetadataResolverBundle);
 
         environment.jersey().register(new EidasAuthnRequestResource(
                 configuration,
@@ -217,7 +170,9 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
                 connectorNodeUrl,
                 configuration.getConnectorMetadataConfiguration().getExpectedEntityId(),
                 connectorMetadata,
-                hubResponseSignatureValidator));
+                configuration.getProxyNodeResponseUrl(),
+                configuration.getProxyNodeEntityId(),
+                hubResponseMessageSignatureValidator));
     }
 
     public void registerMetadataHealthCheck(MetadataResolver metadataResolver, MetadataConfiguration connectorMetadataConfiguration, Environment environment, String name) {
@@ -228,5 +183,67 @@ public class EidasProxyNodeApplication extends Application<EidasProxyNodeConfigu
         );
 
         environment.healthChecks().register(metadataHealthCheck.getName(), metadataHealthCheck);
+    }
+
+    private Metadata createMetadata(MetadataResolverBundle bundle) throws ComponentInitializationException {
+        MetadataCredentialResolver metadataCredentialResolver = new MetadataCredentialResolverInitializer(bundle.getMetadataResolver()).initialize();
+        return new Metadata(metadataCredentialResolver);
+    }
+
+    private AssertionDecrypter createDecrypter(KeyPairConfiguration configuration) {
+        BasicCredential decryptionCredential = new BasicCredential(
+            configuration.getPublicKey().getPublicKey(),
+            configuration.getPrivateKey().getPrivateKey()
+        );
+        List<Credential> decryptionCredentials = ImmutableList.of(decryptionCredential);
+        Decrypter decrypter = new DecrypterFactory().createDecrypter(decryptionCredentials);
+        EncryptionAlgorithmValidator encryptionAlgorithmValidator = new EncryptionAlgorithmValidator();
+        return new AssertionDecrypter(
+            encryptionAlgorithmValidator,
+            decrypter
+        );
+    }
+
+    private EidasAuthnRequestValidator createEidasAuthnRequestValidator() {
+        return new EidasAuthnRequestValidator(
+            new RequestIssuerValidator(),
+            new SpTypeValidator(),
+            new LoaValidator(),
+            new RequestedAttributesValidator()
+        );
+    }
+
+    private SamlMessageSignatureValidator createSamlMessagesSignatureValidator(MetadataResolverBundle hubMetadataResolverBundle) throws ComponentInitializationException {
+        MetadataCredentialResolver hubMetadataCredentialResolver = new MetadataCredentialResolverInitializer(hubMetadataResolverBundle.getMetadataResolver()).initialize();
+        KeyInfoCredentialResolver keyInfoCredentialResolver = DefaultSecurityConfigurationBootstrap.buildBasicInlineKeyInfoCredentialResolver();
+        ExplicitKeySignatureTrustEngine explicitKeySignatureTrustEngine = new ExplicitKeySignatureTrustEngine(hubMetadataCredentialResolver, keyInfoCredentialResolver);
+        MetadataBackedSignatureValidator metadataBackedSignatureValidator = MetadataBackedSignatureValidator.withoutCertificateChainValidation(explicitKeySignatureTrustEngine);
+        return new SamlMessageSignatureValidator(metadataBackedSignatureValidator);
+    }
+
+    private HubAuthnRequestGenerator createHubAuthnRequestGenerator(EidasProxyNodeConfiguration configuration) {
+        EidasAuthnRequestTranslator eidasAuthnRequestTranslator = new EidasAuthnRequestTranslator(
+            configuration.getProxyNodeEntityId(),
+            configuration.getHubUrl().toString());
+        SamlObjectSigner signer = new SamlObjectSigner(
+            configuration.getHubFacingSigningKeyPair().getPublicKey().getPublicKey(),
+            configuration.getHubFacingSigningKeyPair().getPrivateKey().getPrivateKey(),
+            configuration.getHubFacingSigningKeyPair().getPublicKey().getCert()
+        );
+        return new HubAuthnRequestGenerator(eidasAuthnRequestTranslator, signer);
+    }
+
+    private EidasResponseGenerator createEidasResponseGenerator(EidasProxyNodeConfiguration configuration) {
+        HubResponseTranslator hubResponseTranslator = new HubResponseTranslator(
+            new EidasResponseBuilder(configuration.getConnectorNodeIssuerId()),
+            connectorNodeUrl,
+            configuration.getProxyNodeMetadataForConnectorNodeUrl().toString()
+        );
+        SamlObjectSigner signer = new SamlObjectSigner(
+            configuration.getConnectorFacingSigningKeyPair().getPublicKey().getPublicKey(),
+            configuration.getConnectorFacingSigningKeyPair().getPrivateKey().getPrivateKey(),
+            configuration.getConnectorFacingSigningKeyPair().getPublicKey().getCert()
+        );
+        return new EidasResponseGenerator(hubResponseTranslator, signer);
     }
 }

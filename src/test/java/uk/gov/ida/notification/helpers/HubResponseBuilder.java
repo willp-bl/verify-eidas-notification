@@ -52,6 +52,11 @@ public class HubResponseBuilder {
         return this;
     }
 
+    public HubResponseBuilder withDestination(String destination) {
+        responseBuilder.withDestination(destination);
+        return this;
+    }
+
     public Response build() throws MarshallingException, SignatureException {
         return responseBuilder
                 .withoutSignatureElement()
