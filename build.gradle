@@ -20,6 +20,7 @@ project.ext {
     dropwizardVersion = '1.2.0'
     openSamlVersion = '3.3.0'
     utilsVersion = '2.0.0'
+    samlLibsVersion = "${openSamlVersion}-104"
 }
 
 repositories {
@@ -33,12 +34,12 @@ dependencies {
         "io.dropwizard:dropwizard-views-mustache:${dropwizardVersion}",
         "org.opensaml:opensaml-core:${openSamlVersion}",
         "org.opensaml:opensaml-saml-impl:${openSamlVersion}",
-        "uk.gov.ida:ida-saml-extensions:${openSamlVersion}-1.2a-41",
-        "uk.gov.ida:saml-metadata-bindings:${openSamlVersion}-68",
-        "uk.gov.ida:saml-security:${openSamlVersion}-58",
-        "uk.gov.ida:security-utils:${utilsVersion}-331",
-        "se.litsec.eidas:eidas-opensaml3:1.0.5",
-        "uk.gov.ida:hub-saml:${openSamlVersion}-115",
+        "uk.gov.ida:saml-extensions:${samlLibsVersion}",
+        "uk.gov.ida:saml-metadata-bindings:${samlLibsVersion}",
+        "uk.gov.ida:saml-security:${samlLibsVersion}",
+        "uk.gov.ida:security-utils:${utilsVersion}-332",
+        "se.litsec.eidas:eidas-opensaml3:1.1.0",
+        "uk.gov.ida:hub-saml:${openSamlVersion}-120",
     )
     testCompile(
         'junit:junit:4.12',
@@ -47,8 +48,7 @@ dependencies {
         "io.dropwizard:dropwizard-testing:${dropwizardVersion}",
         'net.sourceforge.htmlunit:htmlunit:2.28',
         "uk.gov.ida:common-test-utils:${utilsVersion}-38",
-        "uk.gov.ida:saml-metadata-bindings-test:${openSamlVersion}-68",
-        "uk.gov.verify:saml-test-utils:${openSamlVersion}-2",
+        "uk.gov.ida:saml-metadata-bindings-test:${samlLibsVersion}"
     )
 }
 
